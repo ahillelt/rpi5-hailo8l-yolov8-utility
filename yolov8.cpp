@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <array>
 
+#include <thread>
+
 #include "output_tensor.h"
 #include "debug.h"
 
@@ -82,6 +84,7 @@ void parseArguments(int argc, char** argv) {
             compressionCodec = argv[++i];
         } else if (arg == "--camera" && i + 1 < argc) {
             useCamera = true;
+            inputMode = "camera";
             cameraMode = argv[++i];
         } else if (arg == "--help") {
             printUsage();
@@ -103,30 +106,33 @@ std::string exec(const char* cmd) {
     return result;
 }
 
-void compressVideo(const fs::path& inputPath, const fs::path& outputPath, const std::string& codec, std::string& ffmpeg_output) {
-    fs::path tempOutputPath = outputPath.parent_path() / ("temp_" + outputPath.filename().string());
+void compressVideo(const fs::path& inputPath, const fs::path& outputPath, const std::string& codec) {
+    fs::path tempOutputPath = outputPath.parent_path() / ("temp_compressed_" + outputPath.filename().string());
     std::string ffmpeg_cmd;
     if (!codec.empty()) {
         if (codec == "h.265" || codec == "H.265") {
-            ffmpeg_cmd = "ffmpeg -y -i " + inputPath.string() + 
-                         " -c:v libx265 -preset fast -crf 32 " + 
-                         tempOutputPath.string();
+            ffmpeg_cmd = "ffmpeg -y -i \"" + inputPath.string() + 
+                         "\" -c:v libx265 -preset fast -crf 32 \"" + 
+                         tempOutputPath.string() + "\"";
         } else {
             // Use H.264 as the default codec
-            ffmpeg_cmd = "ffmpeg -y -i " + inputPath.string() + 
-                         " -c:v libx264 -preset fast -crf 28 " + 
-                         tempOutputPath.string();
+            ffmpeg_cmd = "ffmpeg -y -i \"" + inputPath.string() + 
+                         "\" -c:v libx264 -preset fast -crf 28 \"" + 
+                         tempOutputPath.string() + "\"";
         }
     } else {
         // Use H.264 as the default codec
-        ffmpeg_cmd = "ffmpeg -y -i " + inputPath.string() + 
-                     " -c:v libx264 -preset fast -crf 28 " + 
-                     tempOutputPath.string();
+        ffmpeg_cmd = "ffmpeg -y -i \"" + inputPath.string() + 
+                     "\" -c:v libx264 -preset fast -crf 28 \"" + 
+                     tempOutputPath.string() + "\"";
     }
 
     printf("Compressing video with command: %s\n", ffmpeg_cmd.c_str());
-    ffmpeg_output = exec(ffmpeg_cmd.c_str());
-    printf("FFmpeg output:\n%s\n", ffmpeg_output.c_str());
+    int result = system(ffmpeg_cmd.c_str());
+    if (result != 0) {
+        printf("Error: FFmpeg command failed with exit code %d\n", result);
+        return;
+    }
 
     // Check if the temporary output file was created
     if (!fs::exists(tempOutputPath)) {
@@ -200,9 +206,24 @@ int processCameraFeed(hailort::InferModel& infer_model, hailort::ConfiguredInfer
         duration_seconds = 10;
     }
 
-    printf("Camera mode: %s\n", always_on ? "Always on" : ("Recording for " + std::to_string(duration_seconds) + " seconds"));
+    printf("Camera mode: %s\n", always_on ? "Always on" : (cameraMode + " seconds").c_str());
 
-    while (true) {
+    bool stop_recording = false;
+    std::thread input_thread;
+
+    if (always_on) {
+        input_thread = std::thread([&stop_recording]() {
+            while (!stop_recording) {
+                char c = std::cin.get();
+                if (c == 'q' || c == 's') {
+                    stop_recording = true;
+                    break;
+                }
+            }
+        });
+    }
+
+    while (!stop_recording) {
         cap.read(frame);
         if (frame.empty()) {
             printf("Error capturing frame\n");
@@ -220,14 +241,13 @@ int processCameraFeed(hailort::InferModel& infer_model, hailort::ConfiguredInfer
             break;
         }
 
-        if (always_on) {
-            // Check for key press (non-blocking)
-            int key = cv::waitKey(1);
-            if (key >= 0) {
-                printf("Key pressed. Stopping recording.\n");
-                break;
-            }
+        if (cv::waitKey(1) >= 0) {
+            break;
         }
+    }
+
+    if (always_on && input_thread.joinable()) {
+        input_thread.join();
     }
 
     cap.release();
@@ -236,17 +256,18 @@ int processCameraFeed(hailort::InferModel& infer_model, hailort::ConfiguredInfer
     printf("Recorded %d frames from camera\n", frame_count);
 
     // Compress the video
-    std::string ffmpeg_output;
-    compressVideo(tempOutputPath, finalOutputPath, compressionCodec, ffmpeg_output);
-    if (!fs::exists(finalOutputPath)) {
-        printf("FFmpeg command failed. Output:\n%s\n", ffmpeg_output.c_str());
-        return 1;
-    }
+    compressVideo(tempOutputPath, finalOutputPath, compressionCodec);
 
     // Remove temporary file
-    fs::remove(tempOutputPath);
+    if (fs::exists(tempOutputPath)) {
+        fs::remove(tempOutputPath);
+    }
 
-    printf("Final output video size: %.2f MB\n", fs::file_size(finalOutputPath) / (1024.0 * 1024.0));
+    if (fs::exists(finalOutputPath)) {
+        printf("Final output video size: %.2f MB\n", fs::file_size(finalOutputPath) / (1024.0 * 1024.0));
+    } else {
+        printf("Error: Final output video was not created.\n");
+    }
 
     return 0;
 }
@@ -422,7 +443,7 @@ int processVideo(const std::string& videoFilename, hailort::InferModel& infer_mo
 
     // Compress the video
     std::string ffmpeg_output;
-    compressVideo(tempOutputPath, finalOutputPath, compressionCodec, ffmpeg_output);
+    compressVideo(tempOutputPath, finalOutputPath, compressionCodec);
 
     // Remove temporary file
     if (fs::exists(tempOutputPath)) {
@@ -517,17 +538,17 @@ int main(int argc, char** argv) {
     printf("NMS IoU threshold: %.2f\n", nmsIoUThreshold);
     printf("Input mode: %s\n", inputMode.c_str());
     printf("Compression codec: %s\n", compressionCodec.empty() ? "None" : compressionCodec.c_str());
-	
-    if (useCamera) {
-        printf("Camera mode: %s\n", cameraMode.c_str());
-    }
+    
+//    if (useCamera) {
+//        printf("Camera mode: %s\n", cameraMode.c_str());
+//    }
 
     int status = run();
-	
+    
     if (status == 0)
         printf("SUCCESS\n");
     else
         printf("Failed with error code %d\n", status);
-	
+    
     return status;
 }
