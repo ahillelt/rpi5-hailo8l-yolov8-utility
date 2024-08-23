@@ -44,4 +44,6 @@ WORK IN PROGRESS:
 
 <ins>Note we are working with a locally built opencv4, this takes a long time to build on a Raspberry Pi 5. This is not necessary for deployments</ins>
 Don't forget '-g' for GDB when needed
-```g++ -std=c++17 -O3 -march=armv8-a+crc+crypto -mtune=cortex-a76 -fopenmp -o yolohailo yolov8.cpp -lhailort `pkg-config --cflags --libs opencv4` -lstdc++fs ```
+
+```g++ -std=c++17 -O2 -o yolohailo yolov8.cpp -lhailort `pkg-config --cflags --libs opencv4` -lstdc++fs```
+
