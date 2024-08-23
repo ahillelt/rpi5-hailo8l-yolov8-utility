@@ -33,7 +33,10 @@ Optimizations were performed to enable operating even on the smaller 4GB RPI5. T
 11. **Optimize I/O operations:**
    Use asynchronous I/O for writing processed frames to disk to avoid blocking the main processing loop.
 
+WORK IN PROGRESS:
+
+
 13. **Use NEON intrinsic:**
-   For performance-critical sections, we use ARM NEON intrinsics to leverage SIMD instruction. It is especially useful for fast image normalization.
+   For performance-critical sections, I am looking at ARM NEON intrinsics to leverage SIMD instruction. This could be especially useful for fast image normalization. Still researching. I want to avoid bad segmentation faults or other issues that challenge robustness of the code for a marginal gain. 
    
 
