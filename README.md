@@ -40,3 +40,8 @@ WORK IN PROGRESS:
    For performance-critical sections, I am looking at ARM NEON intrinsics to leverage SIMD instruction. This could be especially useful for fast image normalization. Still researching. I want to avoid bad segmentation faults or other issues that challenge robustness of the code for a marginal gain. 
    
 
+## Compile settings w/ GDB
+
+<ins>Note we are working with a locally built opencv4, this takes a long time to build on a Raspberry Pi 5. This is not necessary for deployments</ins>
+
+```g++ -std=c++17 -O3 -march=armv8-a+crc+crypto -mtune=cortex-a76 -fopenmp -o yolohailo yolov8.cpp -lhailort `pkg-config --cflags --libs opencv4` -lstdc++fs -g```
